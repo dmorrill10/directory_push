@@ -1,0 +1,79 @@
+#!/usr/bin/env ruby
+
+require 'optparse'
+require 'directory_push'
+include DirectoryPush
+
+options = {}
+OptionParser.new do |opts|
+  opts.banner = "Usage: #{__FILE__} [options]"
+
+  opts.on_tail("-h", "--help", "Show this message") do
+    puts opts
+    exit
+  end
+
+  options[:directory_path] = nil
+  opts.on(
+    "-d",
+    "--directory-path [PROJECT PATH]",
+    "Path to the directory to push."
+  ) do |d|
+    options[:directory_path] = d
+  end
+
+  options[:pull] = false
+  opts.on(
+    "-l",
+    "--[no-]pull",
+    "Pull changes before pushing. Defaults to #{options[:pull]}"
+  ) do |d|
+    options[:pull] = d
+  end
+
+  options[:path_on_remote] = nil
+  opts.on("-n", "--path-on-remote [PATH]", "Path to the pushed directory on the remote server.") do |d|
+    options[:path_on_remote] = d
+  end
+
+  options[:remote_address] = nil
+  opts.on("-r", "--remote-address [ADDRESS]", "Address to the remote server.") do |d|
+    options[:remote_address] = d
+  end
+
+  options[:user] = nil
+  opts.on(
+    "-u",
+    "--user [USER]",
+    %W{The user name to use to login to the remote server. Defaults to "#{DirectoryPush.DEFAULT_USER}".}
+  ) do |d|
+    options[:user] = d
+  end
+
+  options[:rsync_options] = DirectoryPush.DEFAULT_RSYNC_OPTIONS
+  opts.on(
+    "-o",
+    "--rsync-options O1,O2,O3",
+    Array,
+    %W{rsync options. Defaults to #{options[:rsync_options]}.}
+  ) { |a| options[:rsync_options] = a.map { |e| e.to_s  } }
+
+  options[:guard_ignore_pattern] = nil
+  opts.on(
+    "-g",
+    "--guard-ignore-pattern [PATTERN]",
+    %W{Pattern describing files that gaurd should ignore during its watch.}
+  ) do |d|
+    options[:guard_ignore_pattern] = d
+  end
+end.parse!
+
+DirectoryPush.new(
+  options[:directory_path],
+  options[:remote_address],
+  user: options[:user],
+  path_on_remote: options[:path_on_remote],
+  pull: options[:pull],
+  rsync_options: options[:rsync_options],
+  guard_ignore_pattern: options[:guard_ignore_pattern]
+).watch
