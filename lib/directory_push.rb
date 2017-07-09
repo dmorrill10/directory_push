@@ -40,6 +40,9 @@ remote = %Q{#{config.delete(:user)}@#{config.delete(:remote_address)}:"#{config.
 rsync_options << source << remote
 $rsync_command = rsync_options.join(' ')
 
+rsync_options_without_delete = rsync_options.reject { |o| o.match('--del') }
+$rsync_command_without_delete = rsync_options_without_delete.join(' ')
+
 module ::Guard
   class DirectoryPush < Plugin
     def start() sync end
@@ -47,21 +50,26 @@ module ::Guard
     def run_all() sync end
     def run_on_additions(paths)
       Compat::UI.info "Guard::DirectoryPush Files created: #{paths}."
-      sync
+      sync_without_delete
     end
     def run_on_modifications(paths)
       Compat::UI.info "Guard::DirectoryPush Files changed: #{paths}."
-      sync
+      sync_without_delete
     end
     def run_on_removals(paths)
       Compat::UI.info "Guard::DirectoryPush Files removed: #{paths}."
-      sync
+      sync_without_delete
     end
 
     private
     def sync()
       Compat::UI.info %Q{Guard::DirectoryPush `#{$rsync_command}`.}
       system $rsync_command
+    end
+
+    def sync_without_delete()
+      Compat::UI.info %Q{Guard::DirectoryPush `#{$rsync_command_without_delete}`.}
+      system $rsync_command_without_delete
     end
   end
 end
