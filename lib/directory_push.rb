@@ -19,6 +19,7 @@ module DirectoryPush
 
     FILTER_FILE_NAME = '.rsync-filter'
       DEFAULT_RSYNC_OPTIONS = [
+      '--delete',
       '--verbose',
       '--archive',
       '--compress',
@@ -29,48 +30,38 @@ module DirectoryPush
     GUARDFILE_TEXT = %q{
 require 'yaml'
 require 'guard/compat/plugin'
-require 'rsync'
 
 config = YAML.load(File.read(File.join(File.dirname(__FILE__), 'config.yml')))
-$rsync_options = config.delete(:rsync)
-$rsync_options << '--delete'
-$source = config.delete(:source)
+rsync_options = ['rsync'] + config.delete(:rsync)
+source = config.delete(:source)
 ignore_pattern = config.delete(:ignore)
-$remote = %Q{#{config.delete(:user)}@#{config.delete(:remote_address)}:"#{config.delete(:destination)}"}
+remote = %Q{#{config.delete(:user)}@#{config.delete(:remote_address)}:"#{config.delete(:destination)}"}
+
+rsync_options << source << remote
+$rsync_command = rsync_options.join(' ')
 
 module ::Guard
   class DirectoryPush < Plugin
-    private
-    def sync()
-      Compat::UI.info %Q{Guard::DirectoryPush source: "#{$source}", destination: "#{$remote}", options: #{$rsync_options}}
-      result = Rsync.run $source, $remote, $rsync_options
-      if result.success?
-        result.changes.each do |change|
-          Compat::UI.info "#{change.filename} (#{change.summary})"
-        end
-      else
-        Compat::UI.error result.error
-        raise result.error
-      end
-    end
-
-    public
-
-    alias_method :start, :sync
-    alias_method :stop, :sync
-    alias_method :reload, :sync
-    alias_method :run_all, :sync
+    def start() sync end
+    def reload() sync end
+    def run_all() sync end
     def run_on_additions(paths)
-      Compat::UI.info "Guard::DirectoryPush Files created: #{paths}"
+      Compat::UI.info "Guard::DirectoryPush Files created: #{paths}."
       sync
     end
     def run_on_modifications(paths)
-      Compat::UI.info "Guard::DirectoryPush Files changed: #{paths}"
+      Compat::UI.info "Guard::DirectoryPush Files changed: #{paths}."
       sync
     end
     def run_on_removals(paths)
-      Compat::UI.info "Guard::DirectoryPush Files removed: #{paths}"
+      Compat::UI.info "Guard::DirectoryPush Files removed: #{paths}."
       sync
+    end
+
+    private
+    def sync()
+      Compat::UI.info %Q{Guard::DirectoryPush `#{$rsync_command}`.}
+      system $rsync_command
     end
   end
 end
@@ -79,7 +70,7 @@ config[:verbose] = true
 config[:cli] = '--color'
 config[:sync_on_start] = true
 
-directories [$source]
+directories [source]
 guard 'directory-push', config do
   watch %r{^.+$}
   if ignore_pattern
