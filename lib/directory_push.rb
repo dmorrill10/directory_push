@@ -13,36 +13,80 @@ module DirectoryPush
       :path_on_remote,
       :user,
       :remote_address,
-      :rsync_options
+      :rsync_options,
+      :settings_dir_path
     )
 
     FILTER_FILE_NAME = '.rsync-filter'
-    DEFAULT_RSYNC_OPTIONS = [
-      '-arv'
-      '--progress'
-      %W{--exclude-from '#{FILTER_FILE_NAME}'}
-      %w{--timeout '9999'}
+      DEFAULT_RSYNC_OPTIONS = [
+      '--verbose',
+      '--archive',
+      '--compress',
+      '--progress',
+      %Q{--exclude-from '#{FILTER_FILE_NAME}'},
+      %Q{--timeout '9999'}
     ]
-    GUARDFILE_TEXT = <<EOS
+    GUARDFILE_TEXT = %q{
 require 'yaml'
+require 'guard/compat/plugin'
+require 'rsync'
 
 config = YAML.load(File.read(File.join(File.dirname(__FILE__), 'config.yml')))
+$rsync_options = config.delete(:rsync)
+$rsync_options << '--delete'
+$source = config.delete(:source)
+ignore_pattern = config.delete(:ignore)
+$remote = %Q{#{config.delete(:user)}@#{config.delete(:remote_address)}:"#{config.delete(:destination)}"}
 
-directories [config['source']]
-guard 'remote-sync',
-        :source => config['source'],
-        :destination => config['destination'],
-        :user => config['user'],
-        :remote_address => config['remote_address'],
-        :verbose => true,
-        :cli => "--color",
-        :sync_on_start => true do
-  watch %r{^.+$}
-  if config['ignore']
-    ignore config['ignore']
+module ::Guard
+  class DirectoryPush < Plugin
+    private
+    def sync()
+      Compat::UI.info %Q{Guard::DirectoryPush source: "#{$source}", destination: "#{$remote}", options: #{$rsync_options}}
+      result = Rsync.run $source, $remote, $rsync_options
+      if result.success?
+        result.changes.each do |change|
+          Compat::UI.info "#{change.filename} (#{change.summary})"
+        end
+      else
+        Compat::UI.error result.error
+        raise result.error
+      end
+    end
+
+    public
+
+    alias_method :start, :sync
+    alias_method :stop, :sync
+    alias_method :reload, :sync
+    alias_method :run_all, :sync
+    def run_on_additions(paths)
+      Compat::UI.info "Guard::DirectoryPush Files created: #{paths}"
+      sync
+    end
+    def run_on_modifications(paths)
+      Compat::UI.info "Guard::DirectoryPush Files changed: #{paths}"
+      sync
+    end
+    def run_on_removals(paths)
+      Compat::UI.info "Guard::DirectoryPush Files removed: #{paths}"
+      sync
+    end
   end
 end
-EOS
+
+config[:verbose] = true
+config[:cli] = '--color'
+config[:sync_on_start] = true
+
+directories [$source]
+guard 'directory-push', config do
+  watch %r{^.+$}
+  if ignore_pattern
+    ignore ignore_pattern
+  end
+end
+}
 
     DEFAULT_USER = Etc.getlogin
 
@@ -53,35 +97,48 @@ EOS
         path_on_remote: nil,
         pull: false,
         rsync_options: DEFAULT_RSYNC_OPTIONS,
-        guard_ignore_pattern: nil
+        guard_ignore_pattern: nil,
+        preserve_settings: false
     )
-      if remote_address.nil? || remote_address.empty?
+      if (
+        remote_address.nil? ||
+        remote_address.empty? ||
+        remote_address == '~' ||
+        remote_address == '$HOME'
+      )
         raise ArgumentError.new(
-          %W{Remote address, "#{remote_address}", is invalid!}
+          %Q{Remote address, "#{remote_address}", is invalid!}
         )
       end
 
       @directory_path = File.expand_path(directory_path, Dir.pwd)
       unless File.exists?(@directory_path)
         raise ArgumentError.new(
-          %W{Directory "#{@directory_path}" does not exist!}
+          %Q{Directory "#{@directory_path}" does not exist!}
         )
       end
+
+      @user = user
+      if @user.nil? || @user.empty?
+        raise ArgumentError.new(%Q{User "#{@user}" is invalid!.})
+      end
+
       @remote_address = remote_address
-      @path_on_remote = path_on_remote || directory_name
+      @path_on_remote = path_on_remote || @directory_path
       @terminal = HighLine.new
       @pull = pull
       @rsync_options = rsync_options
       @guard_ignore_pattern = guard_ignore_pattern
+      @preserve_settings = preserve_settings
+      @settings_dir_path = File.join(
+        Dir.pwd,
+        ".#{directory_name}.directory_push-settings"
+      )
     end
 
     def pull?() @pull end
 
     def directory_name() File.basename(@directory_path) end
-
-    def settings_dir_path(root = Dir.pwd)
-      File.join(root, ".#{directory_name}.directory_push-settings")
-    end
 
     def ensure_setting_dir_present()
       unless File.directory?(settings_dir_path)
@@ -94,31 +151,28 @@ EOS
     def config_path() File.join(settings_dir_path, 'config.yml') end
     def guardfile_path() File.join(settings_dir_path, 'Guardfile') end
 
-    def create_filter_file()
+    def ensure_filter_file_present()
       ensure_setting_dir_present
       @terminal.say("Creating rsync-filter file")
       gitignore = File.join(@directory_path, '.gitignore')
       if File.exists?(gitignore)
          @terminal.say(
-          %W{Using "#{gitignore}" as rsync-filter since they have the same format.}
+          %Q{Using "#{gitignore}" as rsync-filter since they have the same format.}
         )
         FileUtils.cp(gitignore, filter_path)
       else
-        unless File.exist?(filter_path)
-          File.open(filter_path, 'w') do |f| end
-        end
+        FileUtils.touch(filter_path) unless File.exist?(filter_path)
       end
     end
 
     def config()
       {
-        source: => "#{@directory_path}/",
-        user: => @user,
-        directory_name: => directory_name,
-        remote_address: => @remote_address,
-        destination: => @path_on_remote,
-        rsync: => @rsync_options,
-        ignore: => @guard_ignore_pattern
+        source: "#{@directory_path}/",
+        user: @user,
+        remote_address: @remote_address,
+        destination: @path_on_remote,
+        rsync: @rsync_options,
+        ignore: @guard_ignore_pattern
       }
     end
 
@@ -127,7 +181,7 @@ EOS
     def ensure_config_file_present()
       ensure_setting_dir_present
       unless File.exist?(config_path)
-        @terminal.say %W{Creating config file in "#{config_path}".}
+        @terminal.say %Q{Creating config file in "#{config_path}".}
         File.open(config_path, 'w') { |f| f.print config_to_yml }
       end
     end
@@ -135,40 +189,63 @@ EOS
     def ensure_guardfile_present()
       ensure_setting_dir_present
       unless File.exist?(guardfile_path)
-        @terminal.say %W{Creating Guardfile in "#{guardfile_path}".}
+        @terminal.say %Q{Creating Guardfile in "#{guardfile_path}".}
         File.open(guardfile_path, 'w') { |f| f.print GUARDFILE_TEXT }
       end
+    end
+
+    def pull_from_remote(destination)
+      source = "#{@user}@#{@remote_address}:#{@path_on_remote}"
+
+      @terminal.say %Q{Pulling from "#{source}" and replacing the contents of "#{destination}".}
+
+      sync source, destination
+    end
+
+    def sync(source, destination)
+      result = Rsync.run source, destination, @rsync_options
+      if result.success?
+        result.changes.each do |change|
+          @terminal.say "#{change.filename} (#{change.summary})"
+        end
+      else
+        @terminal.say result.error
+      end
+    end
+
+    def backup_dir_path(d)
+      File.join settings_dir_path, "#{File.basename(d)}.bak"
     end
 
     def watch()
       ensure_config_file_present
       ensure_guardfile_present
+      ensure_filter_file_present
       Dir.chdir settings_dir_path do |d|
         if pull?
-          destination = @directory_path
-          source = "#{@user}@#{@remote_address}:#{@path_on_remote}"
+          directory_path_bak = backup_dir_path(@directory_path)
+          @terminal.say %Q{Backing up "#{@directory_path}" in "#{directory_path_bak}".}
+          FileUtils.cp_r @directory_path, directory_path_bak
 
-          @terminal.say %W{Pulling from "#{source}" and replacing the contents of "#{destination}".}
+          pull_from_remote @directory_path
+        else
+          source = "#{@user}@#{@remote_address}:#{@path_on_remote}/"
+          source_bak = backup_dir_path(@path_on_remote)
 
-          Rsync.run(source, destination, @rsync_options) do |result|
-            if result.success?
-              result.changes.each do |change|
-                @terminal.say "#{change.filename} (#{change.summary})"
-              end
-            else
-              @terminal.say result.error
-            end
-          end
+          @terminal.say %Q{Backing up "#{source}" in "#{source_bak}".}
+          sync source, source_bak
         end
 
         @terminal.say "Starting Guard"
-        command = "bundle exec guard"
+        command = "guard"
         @terminal.say command
         system command
       end
 
-      @terminal.say %W{Removing settings directory, "#{settings_dir_path}".}
-      FileUtils.rm_rf(settings_dir_path)
+      unless @preserve_settings
+        @terminal.say %Q{Removing settings directory, "#{settings_dir_path}".}
+        FileUtils.rm_rf(settings_dir_path)
+      end
     end
   end
 end

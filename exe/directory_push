@@ -41,39 +41,49 @@ OptionParser.new do |opts|
     options[:remote_address] = d
   end
 
-  options[:user] = nil
+  options[:user] = Cli::DEFAULT_USER
   opts.on(
     "-u",
     "--user [USER]",
-    %W{The user name to use to login to the remote server. Defaults to "#{DirectoryPush.DEFAULT_USER}".}
+    %W{The user name to use to login to the remote server. Defaults to "#{options[:user]}".}
   ) do |d|
     options[:user] = d
   end
 
-  options[:rsync_options] = DirectoryPush.DEFAULT_RSYNC_OPTIONS
+  options[:rsync_options] = Cli::DEFAULT_RSYNC_OPTIONS
   opts.on(
     "-o",
-    "--rsync-options O1,O2,O3",
+    "--rsync-options OPTS",
     Array,
-    %W{rsync options. Defaults to #{options[:rsync_options]}.}
+    %Q{rsync options. Defaults to #{options[:rsync_options]}.}
   ) { |a| options[:rsync_options] = a.map { |e| e.to_s  } }
 
-  options[:guard_ignore_pattern] = nil
+  options[:ignore_pattern] = nil
   opts.on(
-    "-g",
-    "--guard-ignore-pattern [PATTERN]",
+    "-i",
+    "--ignore-pattern [PATTERN]",
     %W{Pattern describing files that gaurd should ignore during its watch.}
   ) do |d|
-    options[:guard_ignore_pattern] = d
+    options[:ignore_pattern] = d
+  end
+
+  options[:preserve_settings] = true
+  opts.on(
+    "-s",
+    "--[no-]preserve_settings",
+    %W{Preserve the configuration settings and a backup of the remote directory before pushing after exiting. Defaults to #{options[:preserve_settings]}.}
+  ) do |d|
+    options[:preserve_settings] = d
   end
 end.parse!
 
-DirectoryPush.new(
+Cli.new(
   options[:directory_path],
   options[:remote_address],
   user: options[:user],
   path_on_remote: options[:path_on_remote],
   pull: options[:pull],
   rsync_options: options[:rsync_options],
-  guard_ignore_pattern: options[:guard_ignore_pattern]
+  guard_ignore_pattern: options[:ignore_pattern],
+  preserve_settings: options[:preserve_settings]
 ).watch
