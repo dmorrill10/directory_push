@@ -45,7 +45,7 @@ OptionParser.new do |opts|
   opts.on(
     "-u",
     "--user [USER]",
-    %W{The user name to use to login to the remote server. Defaults to "#{options[:user]}".}
+    %Q{The user name to use to login to the remote server. Defaults to "#{options[:user]}".}
   ) do |d|
     options[:user] = d
   end
@@ -62,7 +62,7 @@ OptionParser.new do |opts|
   opts.on(
     "-i",
     "--ignore-pattern [PATTERN]",
-    %W{Pattern describing files that gaurd should ignore during its watch.}
+    %Q{Pattern describing files that gaurd should ignore during its watch.}
   ) do |d|
     options[:ignore_pattern] = d
   end
@@ -71,7 +71,7 @@ OptionParser.new do |opts|
   opts.on(
     "-s",
     "--[no-]preserve_settings",
-    %W{Preserve the configuration settings and a backup of the remote directory before pushing after exiting. Defaults to #{options[:preserve_settings]}.}
+    %Q{Preserve the configuration settings and a backup of the remote directory before pushing after exiting. Defaults to #{options[:preserve_settings]}.}
   ) do |d|
     options[:preserve_settings] = d
   end
