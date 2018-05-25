@@ -35,7 +35,7 @@ config = YAML.load(File.read(File.join(File.dirname(__FILE__), 'config.yml')))
 rsync_options = ['rsync'] + config.delete(:rsync)
 source = config.delete(:source)
 ignore_pattern = config.delete(:ignore)
-remote = %Q{#{config.delete(:user)}@#{config.delete(:remote_address)}:"#{config.delete(:destination)}"}
+remote = %Q{#{config.delete(:address_prefix)}"#{config.delete(:destination)}"}
 
 rsync_options << source << remote
 $rsync_command = rsync_options.join(' ')
@@ -105,9 +105,7 @@ end
         remote_address == '~' ||
         remote_address == '$HOME'
       )
-        raise ArgumentError.new(
-          %Q{Remote address, "#{remote_address}", is invalid!}
-        )
+        remote_address = nil
       end
 
       @directory_path = File.expand_path(directory_path, Dir.pwd)
@@ -167,9 +165,8 @@ end
     def config()
       {
         source: "#{@directory_path}/",
-        user: @user,
-        remote_address: @remote_address,
         destination: @path_on_remote,
+        address_prefix: address_prefix,
         rsync: @rsync_options,
         ignore: @guard_ignore_pattern
       }
@@ -193,9 +190,16 @@ end
       end
     end
 
-    def pull_from_remote(destination)
-      source = "#{@user}@#{@remote_address}:#{@path_on_remote}"
+    def address_prefix
+      if @remote_address
+        "#{@user}@#{@remote_address}:"
+      else
+        ''
+      end
+    end
 
+    def pull_from_remote(destination)
+      source = "#{address_prefix}#{@path_on_remote}"
       @terminal.say %Q{Pulling from "#{source}" and replacing the contents of "#{destination}".}
 
       sync source, destination
@@ -228,7 +232,7 @@ end
 
           pull_from_remote @directory_path
         else
-          source = "#{@user}@#{@remote_address}:#{@path_on_remote}/"
+          source = "#{address_prefix}#{@path_on_remote}/"
           source_bak = backup_dir_path(@path_on_remote)
 
           @terminal.say %Q{Backing up "#{source}" in "#{source_bak}".}
